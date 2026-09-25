@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using ClinicBooking.Api.Data;
 using ClinicBooking.Api.Models;
+using ClinicBooking.Api.Dtos;
 
 namespace ClinicBooking.Api.Controllers
 {
@@ -18,76 +19,126 @@ namespace ClinicBooking.Api.Controllers
         }
 
         [HttpGet]
-        public async Task<List<Appointment>> GetAppointmentAsync()
+        public async Task<List<AppointmentDto>> GetAppointmentsAsync()
         {
-            var query = await _context.Appointments.ToListAsync();
-            return query;
+            var appointments = await _context.Appointments
+                .Include(a => a.Doctor)
+                .Include(a => a.Patient)
+                .ToListAsync();
+
+            var appointmentDtos = new List<AppointmentDto>();
+
+            foreach (var appointment in appointments)
+            {
+                appointmentDtos.Add(new AppointmentDto
+                {
+                    Id = appointment.Id,
+                    DateTimeAppointment = appointment.DateTimeAppointment,
+                    Status = appointment.Status,
+                    DoctorName = appointment.Doctor.Name + " " + appointment.Doctor.Lastname,
+                    PatientName = appointment.Patient.Name + " " + appointment.Patient.Lastname
+                });
+            }
+
+            return appointmentDtos;
         }
 
         [HttpGet("{id}")]
-        public async Task<ActionResult<Appointment>> GetById(int id)
+        public async Task<ActionResult<AppointmentDto>> GetById(int id)
         {
-            var appointment = await _context.Appointments.FindAsync(id);
-            return appointment == null ? NotFound() : Ok(appointment);
-        }
+            var appointment = await _context.Appointments
+                .Include(a => a.Doctor)
+                .Include(a => a.Patient)
+                .FirstOrDefaultAsync(a => a.Id == id);
 
-        [HttpPost]
-        public async Task<ActionResult<Appointment>> AddAppointmentAsync(Appointment newAppointment)
-        {
-        // qui newAppointment.DoctorId e newAppointment.PatientId arrivano dal chiamante
-        // come due semplici numeri interi (es. 5 e 12)
-
-        var doctorExist = await _context.Doctors.FindAsync(newAppointment.DoctorId);
-    
-        // controlla che esista davvero un Doctor con quell'Id
-        if(doctorExist == null)
-            {
-                return BadRequest("Il medico indicato non esiste.");
-            }
-        var patientExist = await _context.Patients.FindAsync(newAppointment.PatientId);
-
-        // controlla che esista davvero un Patient con quell'Id
-        if(patientExist == null)
-            {
-                return BadRequest("Il paziente indicato non esiste.");
-            }   
-        // controlla che quel Doctor non abbia già un altro Appointment
-        // nello stesso identico DateTimeAppointment
-        bool doctorBusy = await _context.Appointments.AnyAsync(a => 
-        a.DoctorId == newAppointment.DoctorId &&
-        a.DateTimeAppointment == newAppointment.DateTimeAppointment);
-
-        if(doctorBusy)
-            {
-                return BadRequest("Il medico ha già un appuntamento in questo orario.");
-            }
-    
-        await _context.Appointments.AddAsync(newAppointment);
-        await _context.SaveChangesAsync();
-        return CreatedAtAction(nameof(GetById), new { id = newAppointment.Id }, newAppointment);
-        }
-
-        [HttpPut("{id}")]
-        public async Task<ActionResult> UpdateAsync(int id, Appointment updatedAppointment)
-        {
-            var existingAppointment = await _context.Appointments.FindAsync(id);
-
-            if(existingAppointment == null)
+            if (appointment == null)
             {
                 return NotFound();
             }
-            existingAppointment.DateTimeAppointment = updatedAppointment.DateTimeAppointment;
-            existingAppointment.Status = updatedAppointment.Status;
+
+            var appointmentDto = new AppointmentDto
+            {
+                Id = appointment.Id,
+                DateTimeAppointment = appointment.DateTimeAppointment,
+                Status = appointment.Status,
+                DoctorName = appointment.Doctor.Name + " " + appointment.Doctor.Lastname,
+                PatientName = appointment.Patient.Name + " " + appointment.Patient.Lastname
+            };
+
+            return Ok(appointmentDto);
+        }
+
+        [HttpPost]
+        public async Task<ActionResult<AppointmentDto>> AddAppointmentAsync(AppointmentCreateDto newAppointmentDto)
+        {
+            var doctorExist = await _context.Doctors.FindAsync(newAppointmentDto.DoctorId);
+            if (doctorExist == null)
+            {
+                return BadRequest("Il medico indicato non esiste.");
+            }
+
+            var patientExist = await _context.Patients.FindAsync(newAppointmentDto.PatientId);
+            if (patientExist == null)
+            {
+                return BadRequest("Il paziente indicato non esiste.");
+            }
+
+            bool doctorBusy = await _context.Appointments.AnyAsync(a =>
+                a.DoctorId == newAppointmentDto.DoctorId &&
+                a.DateTimeAppointment == newAppointmentDto.DateTimeAppointment);
+
+            if (doctorBusy)
+            {
+                return BadRequest("Il medico ha già un appuntamento in questo orario.");
+            }
+
+            // costruisci l'Appointment vero, decidendo tu lo Status iniziale (ricordi la scelta fatta prima?)
+            var appointment = new Appointment
+            {
+                DateTimeAppointment = newAppointmentDto.DateTimeAppointment,
+                DoctorId = newAppointmentDto.DoctorId,
+                PatientId = newAppointmentDto.PatientId,
+                Status = AppointmentStatus.booked // imposto lo stato prenotata, non ancora confermata 
+            };
+
+            await _context.Appointments.AddAsync(appointment);
+            await _context.SaveChangesAsync();
+
+            var appointmentDto = new AppointmentDto
+            {
+                Id = appointment.Id,
+                DateTimeAppointment = appointment.DateTimeAppointment,
+                Status = appointment.Status,
+                DoctorName = doctorExist.Name + " " + doctorExist.Lastname,     // riusati, niente Include
+                PatientName = patientExist.Name + " " + patientExist.Lastname
+            };
+
+            return CreatedAtAction(nameof(GetById), new { id = appointmentDto.Id }, appointmentDto);
+        }
+
+        // dentro AppointmentsController.cs
+        [HttpPut("{id}")]
+        public async Task<ActionResult> UpdateAsync(int id, AppointmentUpdateDto updatedAppointmentDto)
+        {
+            var existingAppointment = await _context.Appointments.FindAsync(id);
+
+            if (existingAppointment == null)
+            {
+                return NotFound();
+            }
+
+            existingAppointment.DateTimeAppointment = updatedAppointmentDto.DateTimeAppointment;
+            existingAppointment.Status = updatedAppointmentDto.Status;
+
             await _context.SaveChangesAsync();
 
             return NoContent();
-
         }
 
         [HttpDelete("{id}")]
         public async Task<ActionResult> DeleteAsync(int id)
         {
-            var existingAppointment = await _context.Appointments.FindAsync();
+            var existingAppointment = await _context.Appointments.FindAsync(id);
 
             if(existingAppointment == null)
             {
