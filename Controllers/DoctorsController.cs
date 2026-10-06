@@ -3,11 +3,14 @@ using Microsoft.EntityFrameworkCore;
 using ClinicBooking.Api.Data;
 using ClinicBooking.Api.Models;
 using ClinicBooking.Api.Dtos;
+using Microsoft.AspNetCore.Authorization;
 
 namespace ClinicBooking.Api.Controllers
 {
     [ApiController] //dice questa è un API, gestisci automaticamente la validazione dei dati in ingresso e le risposte in formato JSON
     [Route("api/[controller]")] //definisce la route/URL del controller
+    [Authorize(Roles = "admin")]
+
     public class DoctorsController : ControllerBase
     {
         private readonly AppDbContext _context;
